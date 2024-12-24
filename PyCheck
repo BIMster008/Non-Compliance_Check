@@ -1,0 +1,179 @@
+import ifcopenshell
+import xml.etree.ElementTree as ET
+from datetime import datetime
+
+
+def parse_ids(ids_file):
+    """Parse the IDS file to extract properties and property sets."""
+    tree = ET.parse(ids_file)
+    root = tree.getroot()
+    ns = {'ids': 'http://standards.buildingsmart.org/IDS'}
+
+    ids_data = {
+        "properties": {},  # Entity: {PropertySet: [Properties]}
+    }
+
+    # Parse properties
+    for property_elem in root.findall(".//ids:property", ns):
+        property_set_elem = property_elem.find("ids:propertySet/ids:simpleValue", ns)
+        property_name_elem = property_elem.find("ids:baseName/ids:simpleValue", ns)
+        if property_set_elem is not None and property_name_elem is not None:
+            property_set = property_set_elem.text.strip().lower()
+            property_name = property_name_elem.text.strip().lower()
+            for entity in root.findall(".//ids:entity", ns):
+                entity_name_elem = entity.find("ids:name/ids:simpleValue", ns)
+                if entity_name_elem is not None:
+                    entity_name = entity_name_elem.text.strip().lower()
+                    if entity_name not in ids_data["properties"]:
+                        ids_data["properties"][entity_name] = {}
+                    if property_set not in ids_data["properties"][entity_name]:
+                        ids_data["properties"][entity_name][property_set] = []
+                    ids_data["properties"][entity_name][property_set].append(property_name)
+
+    # Debugging: Print parsed IDS properties
+    print("Parsed IDS Properties:", ids_data["properties"])
+    return ids_data
+
+
+def validate_ifc_properties(ifc_file, ids_data):
+    """Validate the IFC file's properties and property sets against IDS definitions."""
+    non_compliant = {
+        "undefined_properties": {}  # {Entity: {PropertySet: [Invalid Properties]}}
+    }
+
+    # Load the IFC file
+    ifc_model = ifcopenshell.open(ifc_file)
+
+    for ifc_entity in ifc_model.by_type("IfcRoot"):
+        entity_name = ifc_entity.is_a().lower()  # Normalize to lowercase
+
+        # Skip entities that are types (e.g., IfcBeamType, IfcWallType)
+        if entity_name.endswith("type"):
+            continue
+
+        # Skip if the entity is not in IDS properties
+        if entity_name not in ids_data["properties"]:
+            continue
+
+        for pset in getattr(ifc_entity, "IsDefinedBy", []):  # Safely access IsDefinedBy
+            if pset.is_a("IfcRelDefinesByProperties") and pset.RelatingPropertyDefinition.is_a("IfcPropertySet"):
+                pset_name = pset.RelatingPropertyDefinition.Name.strip().lower()
+                if pset_name in ids_data["properties"][entity_name]:
+                    for prop in pset.RelatingPropertyDefinition.HasProperties:
+                        if prop.is_a("IfcPropertySingleValue") and prop.Name:
+                            prop_name = prop.Name.strip().lower()
+                            if prop_name not in ids_data["properties"][entity_name][pset_name]:
+                                if entity_name not in non_compliant["undefined_properties"]:
+                                    non_compliant["undefined_properties"][entity_name] = {}
+                                if pset_name not in non_compliant["undefined_properties"][entity_name]:
+                                    non_compliant["undefined_properties"][entity_name][pset_name] = set()
+                                non_compliant["undefined_properties"][entity_name][pset_name].add(prop.Name)
+
+    return non_compliant
+
+
+def save_debug_report(ids_properties, ifc_properties, output_path="debug_report.html"):
+    """Save debugging information to an HTML file."""
+    with open(output_path, "w") as file:
+        file.write("<html><head><title>Debug Report</title></head><body>")
+        file.write("<h1>Debug Report</h1>")
+
+        # Write IDS properties
+        file.write("<h2>Properties in IDS:</h2>")
+        for entity, psets in ids_properties.items():
+            file.write(f"<h3>{entity}:</h3><ul>")
+            for pset, props in psets.items():
+                file.write(f"<li><strong>{pset}</strong>: {', '.join(sorted(props))}</li>")
+            file.write("</ul>")
+
+        # Write IFC properties
+        file.write("<h2>Properties in IFC:</h2>")
+        for entity, psets in ifc_properties.items():
+            file.write(f"<h3>{entity}:</h3><ul>")
+            for pset, props in psets.items():
+                file.write(f"<li><strong>{pset}</strong>: {', '.join(sorted(props))}</li>")
+            file.write("</ul>")
+
+        file.write("</body></html>")
+    print(f"Debug report saved at: {output_path}")
+
+
+def save_results_to_html(non_compliant, output_path="validation_results.html", ifc_file="", ids_file=""):
+    """Save non-compliance results to an HTML file."""
+    # Get the current date and time
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(output_path, "w") as file:
+        file.write("<html><head><title>Validation Results</title></head>")
+        file.write("<body style='font-family: Arial, sans-serif;'>")
+
+        # Centered Title
+        file.write("<h1 style='text-align: center;'>Validation Results</h1>")
+
+        # Date and Time
+        file.write(f"<p style='text-align: center;'>Performed on: {current_time}</p>")
+
+        # File Names
+        file.write(f"<p style='text-align: center;'>IFC File: <strong>{ifc_file}</strong></p>")
+        file.write(f"<p style='text-align: center;'>IDS File: <strong>{ids_file}</strong></p>")
+
+        # Report Non-Compliant Properties
+        if non_compliant["undefined_properties"]:
+            file.write("<h2>Non-Compliant Properties:</h2>")
+            for entity, psets in non_compliant["undefined_properties"].items():
+                file.write(f"<h3>{entity}:</h3>")
+                for pset_name, properties in psets.items():
+                    file.write(f"<h4>PropertySet: {pset_name}</h4><ul>")
+                    for prop in sorted(properties):
+                        file.write(f"<li>{prop}</li>")
+                    file.write("</ul>")
+        else:
+            file.write("<h2>No non-compliant properties found.</h2>")
+
+        file.write("</body></html>")
+    print(f"Validation report saved at: {output_path}")
+
+
+def main():
+    ids_file = "/Users/a.deralla/Desktop/TVG _IDS_Test/Ready IDS/TVG_ARC_IDS.xml"  # Replace with your IDS file path
+    ifc_file = "/Users/a.deralla/Desktop/TVG _IDS_Test/TVG-731-EP-ARC-BIFM-X-XXXX-1_Gesamtmodell.ifc"  # Replace with your IFC file path
+    debug_html = "/Users/a.deralla/Desktop/TVG _IDS_Test/IDS_debug_report.html"   # Path to save the debug HTML report
+    output_html = "/Users/a.deralla/Desktop/TVG _IDS_Test/IDS_validation_results.html"  # Replace with desired HTML output path
+
+    # Parse IDS file
+    ids_data = parse_ids(ids_file)
+    ids_properties = ids_data["properties"]
+
+    # Extract IFC properties for debugging
+    ifc_properties = {}
+    ifc_model = ifcopenshell.open(ifc_file)
+    for ifc_entity in ifc_model.by_type("IfcRoot"):
+        entity_name = ifc_entity.is_a().lower()
+
+        # Skip entities that are types
+        if entity_name.endswith("type"):
+            continue
+
+        for pset in getattr(ifc_entity, "IsDefinedBy", []):  # Safely access IsDefinedBy
+            if pset.is_a("IfcRelDefinesByProperties") and pset.RelatingPropertyDefinition.is_a("IfcPropertySet"):
+                pset_name = pset.RelatingPropertyDefinition.Name.strip().lower()
+                if entity_name not in ifc_properties:
+                    ifc_properties[entity_name] = {}
+                if pset_name not in ifc_properties[entity_name]:
+                    ifc_properties[entity_name][pset_name] = []
+                for prop in pset.RelatingPropertyDefinition.HasProperties:
+                    if prop.is_a("IfcPropertySingleValue") and prop.Name:
+                        ifc_properties[entity_name][pset_name].append(prop.Name.strip().lower())
+
+    # Save debug report
+    save_debug_report(ids_properties, ifc_properties, debug_html)
+
+    # Validate IFC properties
+    non_compliant_items = validate_ifc_properties(ifc_file, ids_data)
+
+    # Generate validation report
+    save_results_to_html(non_compliant_items, output_html, ifc_file=ifc_file, ids_file=ids_file)
+
+
+if __name__ == "__main__":
+    main()
