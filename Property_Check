@@ -135,10 +135,10 @@ def save_results_to_html(non_compliant, output_path="validation_results.html", i
 
 
 def main():
-    ids_file = "/Users/a.deralla/Desktop/TVG _IDS_Test/Ready IDS/TVG_ARC_IDS.xml"  # Replace with your IDS file path
-    ifc_file = "/Users/a.deralla/Desktop/TVG _IDS_Test/TVG-731-EP-ARC-BIFM-X-XXXX-1_Gesamtmodell.ifc"  # Replace with your IFC file path
-    debug_html = "/Users/a.deralla/Desktop/TVG _IDS_Test/IDS_debug_report.html"   # Path to save the debug HTML report
-    output_html = "/Users/a.deralla/Desktop/TVG _IDS_Test/IDS_validation_results.html"  # Replace with desired HTML output path
+    ids_file = "/Users/.../IDS.xml"  # Replace with your IDS file path
+    ifc_file = "/Users/.../IFC.ifc"  # Replace with your IFC file path
+    debug_html = "/Users/.../IDS_debug_report.html"   # Path to save the debug HTML report
+    output_html = "/Users/IDS_validation_results.html"  # Replace with desired HTML output path
 
     # Parse IDS file
     ids_data = parse_ids(ids_file)
